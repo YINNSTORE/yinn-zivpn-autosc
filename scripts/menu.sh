@@ -40,7 +40,6 @@ pause(){ read -rp "Enter untuk lanjut..." _; }
 BASE="/etc/yinn-zivpn"
 CONF="$BASE"
 USERS="$BASE/users"
-BIN="/usr/local/bin/zivpn"
 mkdir -p "$BASE" "$USERS" >/dev/null 2>&1
 
 readf(){ [[ -f "$1" ]] && cat "$1" || true; }
@@ -98,10 +97,10 @@ menu(){
 
   out " ${y}╭────────────────────────────────────────────────────╮${NC}"
   out " ${y}│$NC   ${Blue}[${p}01${NC}${Blue}]$NC ${gg}MENU USER ZIVPN       $NC   ${Blue}[${p}06${NC}${Blue}]$NC ${gg}MENU PENGATURAN $y │$NC"
-  out " ${y}│$NC   ${Blue}[${p}02${NC}${Blue}]$NC ${gg}INSTALL CORE ZIVPN    $NC   ${Blue}[${p}07${NC}${Blue}]$NC ${gg}INFO BHADWITH  $y │$NC"
-  out " ${y}│$NC   ${Blue}[${p}03${NC}${Blue}]$NC ${gg}CHECK SPEEDTEST       $NC   ${Blue}[${p}08${NC}${Blue}]$NC ${gg}BACKUP/RESTORE $y │$NC"
-  out " ${y}│$NC   ${Blue}[${p}04${NC}${Blue}]$NC ${gg}SERVICE STATUS        $NC   ${Blue}[${p}09${NC}${Blue}]$NC ${gg}RELOAD MENU     $y │$NC"
-  out " ${y}│$NC   ${Blue}[${p}05${NC}${Blue}]$NC ${gg}SHOW PATH/INFO        $NC   ${Blue}[${p}10${NC}${Blue}]$NC ${gg}EXIT           $y │$NC"
+  out " ${y}│$NC   ${Blue}[${p}02${NC}${Blue}]$NC ${gg}CHECK SPEEDTEST       $NC   ${Blue}[${p}07${NC}${Blue}]$NC ${gg}INFO BHADWITH  $y │$NC"
+  out " ${y}│$NC   ${Blue}[${p}03${NC}${Blue}]$NC ${gg}SERVICE STATUS        $NC   ${Blue}[${p}08${NC}${Blue}]$NC ${gg}BACKUP/RESTORE $y │$NC"
+  out " ${y}│$NC   ${Blue}[${p}04${NC}${Blue}]$NC ${gg}SHOW PATH/INFO        $NC   ${Blue}[${p}09${NC}${Blue}]$NC ${gg}RELOAD MENU     $y │$NC"
+  out " ${y}│$NC   ${Blue}[${p}05${NC}${Blue}]$NC ${gg}BANDWIDTH INFO        $NC   ${Blue}[${p}10${NC}${Blue}]$NC ${gg}EXIT           $y │$NC"
   out " ${y}╰────────────────────────────────────────────────────╯${NC}"
   echo
 
@@ -109,10 +108,16 @@ menu(){
   echo -e ""
   case "$opt" in
     1) bash "$SCRIPT_DIR/user_manager.sh" ;;
-    2) bash "$SCRIPT_DIR/core_install.sh" ;;
-    3) bash "$SCRIPT_DIR/speedtest.sh" ;;
-    4) systemctl --no-pager status zivpn.service 2>/dev/null || true; pause ;;
-    5) out "BASE: $BASE"; out "USERS: $USERS"; out "CONFIG: $CONF/config.json"; out "BIN: $BIN"; pause ;;
+    2) bash "$SCRIPT_DIR/speedtest.sh" ;;
+    3) systemctl --no-pager status zivpn.service 2>/dev/null || true; pause ;;
+    4)
+      out "BASE: $BASE"
+      out "USERS: $USERS"
+      out "CONFIG: $CONF/config.json"
+      out "BIN: /usr/local/bin/zivpn"
+      pause
+      ;;
+    5) bash "$SCRIPT_DIR/bandwidth.sh" ;;
     6) bash "$SCRIPT_DIR/settings.sh" ;;
     7) bash "$SCRIPT_DIR/bandwidth.sh" ;;
     8) bash "$SCRIPT_DIR/backup.sh" ;;
