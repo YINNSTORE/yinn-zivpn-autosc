@@ -43,6 +43,40 @@ green='\e[0;32m'
 GRAY="\e[1;30m"
 
 # =========================
+# TTY SAFE INPUT (ANTI PIPE)
+# =========================
+TTY="/dev/tty"
+have_tty() { [[ -r "$TTY" ]]; }
+
+tty_read() { # usage: tty_read varname
+  local __var="$1"
+  if have_tty; then
+    IFS= read -r "$__var" < "$TTY"
+  else
+    # no tty (rare) -> empty input
+    printf -v "$__var" '%s' ""
+  fi
+}
+
+tty_read_prompt() { # usage: tty_read_prompt "Prompt: " varname
+  local __prompt="$1"
+  local __var="$2"
+  if have_tty; then
+    printf "%b" "$__prompt" > "$TTY"
+    IFS= read -r "$__var" < "$TTY"
+  else
+    printf -v "$__var" '%s' ""
+  fi
+}
+
+tty_pause_enter() {
+  if have_tty; then
+    printf "%b" "$1" > "$TTY"
+    IFS= read -r _ < "$TTY"
+  fi
+}
+
+# =========================
 # HELPERS
 # =========================
 need_root() {
@@ -249,8 +283,7 @@ precheck() {
   permission_check
 
   echo ""
-  echo -e "${OK} Tekan ENTER untuk memulai instalasi..."
-  read -r
+  tty_pause_enter "$(echo -e "${OK} Tekan ENTER untuk memulai instalasi...\n")"
 
   clear
   echo -e "${Green}"
@@ -268,7 +301,9 @@ input_domain() {
   echo -e " ${green}AUTOSCRIPT ZIVPN - YINN STORE${NC}"
   echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
   echo ""
-  read -rp "Input Domain (wajib): " d
+
+  local d
+  tty_read_prompt "Input Domain (wajib): " d
   if [[ -z "${d:-}" ]]; then
     echo -e "${ERROR} Domain kosong"
     exit 1
@@ -281,8 +316,9 @@ install_core() {
   d="$(cat "${CONF_DIR}/domain" 2>/dev/null || true)"
 
   def="https://github.com/zahidbd2/udp-zivpn/releases/download/udp-zivpn_1.4.9/udp-zivpn-linux-amd64"
+
   echo ""
-  read -rp "Core URL (Enter=default): " url
+  tty_read_prompt "Core URL (Enter=default): " url
   [[ -z "${url:-}" ]] && url="$def"
 
   echo -e "${OK} Download core..."
