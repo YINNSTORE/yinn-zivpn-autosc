@@ -10,12 +10,12 @@ BRANCH="main"
 REPO_RAW_BASE="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${BRANCH}"
 
 # =========================
-# PERMISSION SOURCE (VVIP STYLE)
+# PERMISSION SOURCE
 # =========================
 PERM_URL="https://raw.githubusercontent.com/YINNSTORE/permision/main/reg"
 
 # =========================
-# PATHS (VERSI KITA)
+# PATHS
 # =========================
 WORKDIR="/usr/local/yinn-zivpn"
 SCRIPTS_DIR="${WORKDIR}/scripts"
@@ -57,7 +57,6 @@ get_ip() {
 }
 
 get_server_date() {
-  # ambil tanggal dari header Date (anti jam VPS ngaco)
   local data_server date_list
   data_server="$(curl -v --insecure --silent https://google.com/ 2>&1 | grep -i '^< date:' | sed -e 's/< Date: //I' | tr -d '\r' || true)"
   date_list="$(date +"%Y-%m-%d" -d "$data_server" 2>/dev/null || date +"%Y-%m-%d")"
@@ -97,8 +96,6 @@ print_banner() {
 install_pkgs() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
-
-  # paket inti buat menu + core + utilitas
   apt-get install -y \
     bash curl wget jq openssl ca-certificates \
     iproute2 net-tools vnstat \
@@ -120,14 +117,12 @@ fetch_file() {
 
 setup_scripts() {
   mkdir -p "${SCRIPTS_DIR}"
-
   fetch_file "scripts/menu.sh"         "${SCRIPTS_DIR}/menu.sh"
   fetch_file "scripts/user_manager.sh" "${SCRIPTS_DIR}/user_manager.sh"
   fetch_file "scripts/settings.sh"     "${SCRIPTS_DIR}/settings.sh"
   fetch_file "scripts/backup.sh"       "${SCRIPTS_DIR}/backup.sh"
   fetch_file "scripts/bandwidth.sh"    "${SCRIPTS_DIR}/bandwidth.sh"
   fetch_file "scripts/speedtest.sh"    "${SCRIPTS_DIR}/speedtest.sh"
-
   chmod +x "${SCRIPTS_DIR}/"*.sh
 }
 
@@ -141,6 +136,127 @@ setup_command_menu() {
   if [[ -f /root/.profile ]] && ! grep -q "/usr/local/sbin" /root/.profile; then
     echo 'export PATH="/usr/local/sbin:/usr/local/bin:$PATH"' >> /root/.profile
   fi
+}
+
+# =========================
+# PERMISSION PARSER UNIVERSAL
+# =========================
+# Cari 1 baris yang mengandung IP, lalu ambil:
+# - username: token non-date, non-ip, non-### yang paling masuk akal
+# - exp: token yang match YYYY-MM-DD atau lifetime
+perm_parse_line() {
+  local line ip
+  line="$1"
+  ip="$2"
+
+  # remove CR
+  line="$(echo "$line" | tr -d '\r')"
+
+  # find exp token
+  local exp
+  exp="$(echo "$line" | grep -Eo '(lifetime|Lifetime|[0-9]{4}-[0-9]{2}-[0-9]{2})' | head -n1 || true)"
+
+  # find username token:
+  # ambil token kedua pada format "### user exp ip" kalau ketemu, else cari token non ### non exp non ip
+  local user=""
+  if echo "$line" | grep -qE '^\s*###\s+'; then
+    user="$(echo "$line" | awk '{print $2}' | tr -d '\r' || true)"
+  fi
+  if [[ -z "$user" ]]; then
+    user="$(echo "$line" | awk -v ip="$ip" -v exp="$exp" '
+      {
+        for(i=1;i<=NF;i++){
+          t=$i
+          gsub(/\r/,"",t)
+          if(t=="###") continue
+          if(t==ip) continue
+          if(exp!="" && t==exp) continue
+          if(t ~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/) continue
+          if(t=="lifetime" || t=="Lifetime") continue
+          print t; exit
+        }
+      }' || true)"
+  fi
+
+  echo "${user}|${exp}"
+}
+
+permission_check() {
+  local myip server_date reg line parsed username useexp
+
+  myip="$(get_ip)"
+  server_date="$(get_server_date)"
+
+  if [[ -z "${myip:-}" ]]; then
+    echo -e "${ERROR} IP tidak terdeteksi"
+    exit 1
+  fi
+
+  reg="$(curl -fsSL "$PERM_URL" || true)"
+  line="$(echo "$reg" | grep -F "$myip" | head -n1 || true)"
+
+  echo -e "${OK} IP Address ( ${green}${myip}${NC} )"
+  echo -e "${OK} Server Date ( ${green}${server_date}${NC} )"
+
+  if [[ -z "${line:-}" ]]; then
+    echo -e "${ERROR} VPS anda tidak memiliki akses untuk script"
+    exit 1
+  fi
+
+  parsed="$(perm_parse_line "$line" "$myip")"
+  username="${parsed%%|*}"
+  useexp="${parsed##*|}"
+
+  if [[ -z "${username:-}" ]]; then username="UNKNOWN"; fi
+  if [[ -z "${useexp:-}" ]]; then
+    echo -e "${ERROR} Data permission tidak valid (expiry tidak ketemu)"
+    echo -e "${ERROR} Line: $line"
+    exit 1
+  fi
+
+  echo -e "${OK} Username ( ${green}${username}${NC} )"
+  echo -e "${OK} Expired  ( ${green}${useexp}${NC} )"
+
+  if [[ "$useexp" == "lifetime" || "$useexp" == "Lifetime" ]]; then
+    echo -e "${OK} Permission ( ${green}LIFETIME${NC} )"
+    echo "$username" >/usr/bin/user 2>/dev/null || true
+    echo "$useexp" >/usr/bin/e 2>/dev/null || true
+    return 0
+  fi
+
+  if [[ "$server_date" < "$useexp" ]]; then
+    echo -e "${OK} Permission ( ${green}ACTIVE${NC} )"
+    echo "$username" >/usr/bin/user 2>/dev/null || true
+    echo "$useexp" >/usr/bin/e 2>/dev/null || true
+  else
+    echo -e "${ERROR} Permission EXPIRED (Exp: ${useexp})"
+    exit 1
+  fi
+}
+
+precheck() {
+  print_banner
+  need_root
+  virt_check
+
+  if is_supported_arch; then
+    echo -e "${OK} Architecture Supported ( ${green}$(uname -m)${NC} )"
+  else
+    echo -e "${ERROR} Architecture Not Supported ( $(uname -m) )"
+    exit 1
+  fi
+
+  if is_supported_os; then
+    echo -e "${OK} OS Supported ( ${green}$(grep -w PRETTY_NAME /etc/os-release | head -n1 | cut -d= -f2- | tr -d '"')${NC} )"
+  else
+    echo -e "${ERROR} OS Not Supported"
+    exit 1
+  fi
+
+  permission_check
+
+  echo ""
+  read -p "$(echo -e "Press ${GRAY}[ ${NC}${green}Enter${NC} ${GRAY}]${NC} For Starting Installation") " _
 }
 
 input_domain() {
@@ -212,74 +328,6 @@ EOF
   systemctl restart zivpn.service >/dev/null 2>&1
 }
 
-save_perm_info() {
-  local myip username exp
-  myip="$(get_ip)"
-  username="$(curl -fsSL "$PERM_URL" | grep -w "$myip" | awk '{print $2}' | head -n1 || true)"
-  exp="$(curl -fsSL "$PERM_URL" | grep -w "$myip" | awk '{print $3}' | head -n1 || true)"
-  [[ -n "$username" ]] && echo "$username" > /usr/bin/user || true
-  [[ -n "$exp" ]] && echo "$exp" > /usr/bin/e || true
-}
-
-permission_check() {
-  local myip server_date useexp
-  myip="$(get_ip)"
-  server_date="$(get_server_date)"
-
-  if [[ -z "${myip:-}" ]]; then
-    echo -e "${ERROR} IP tidak terdeteksi"
-    exit 1
-  fi
-
-  useexp="$(curl -fsSL "$PERM_URL" | grep -w "$myip" | awk '{print $3}' | head -n1 || true)"
-
-  echo -e "${OK} IP Address ( ${green}${myip}${NC} )"
-  echo -e "${OK} Server Date ( ${green}${server_date}${NC} )"
-
-  if [[ -z "${useexp:-}" ]]; then
-    echo -e "${ERROR} VPS anda tidak memiliki akses untuk script"
-    exit 1
-  fi
-
-  if [[ "$useexp" == "lifetime" || "$useexp" == "Lifetime" ]]; then
-    echo -e "${OK} Permission ( ${green}LIFETIME${NC} )"
-    return 0
-  fi
-
-  # compare YYYY-MM-DD string
-  if [[ "$server_date" < "$useexp" ]]; then
-    echo -e "${OK} Permission ( ${green}ACTIVE${NC} ) Exp: ${useexp}"
-  else
-    echo -e "${ERROR} Permission EXPIRED (Exp: ${useexp})"
-    exit 1
-  fi
-}
-
-precheck() {
-  print_banner
-  need_root
-  virt_check
-
-  if is_supported_arch; then
-    echo -e "${OK} Architecture Supported ( ${green}$(uname -m)${NC} )"
-  else
-    echo -e "${ERROR} Architecture Not Supported ( $(uname -m) )"
-    exit 1
-  fi
-
-  if is_supported_os; then
-    echo -e "${OK} OS Supported ( ${green}$(grep -w PRETTY_NAME /etc/os-release | head -n1 | cut -d= -f2- | tr -d '"')${NC} )"
-  else
-    echo -e "${ERROR} OS Not Supported"
-    exit 1
-  fi
-
-  permission_check
-
-  echo ""
-  read -p "$(echo -e "Press ${GRAY}[ ${NC}${green}Enter${NC} ${GRAY}]${NC} For Starting Installation") " _
-}
-
 final_info() {
   echo ""
   echo "------------------------------------------------------------"
@@ -287,25 +335,21 @@ final_info() {
   echo "Command : menu"
   echo "Service : systemctl status zivpn.service"
   echo "Domain  : $(cat "${CONF_DIR}/domain" 2>/dev/null || echo '-')"
+  echo "User    : $(cat /usr/bin/user 2>/dev/null || echo '-')"
+  echo "Exp     : $(cat /usr/bin/e 2>/dev/null || echo '-')"
   echo "------------------------------------------------------------"
   echo ""
 }
 
 main() {
   precheck
-
   install_pkgs
   setup_scripts
   setup_command_menu
-
   input_domain
   install_core
-
-  save_perm_info
-
   hash -r || true
   final_info
-
   exec menu
 }
 
