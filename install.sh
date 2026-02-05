@@ -141,27 +141,20 @@ setup_command_menu() {
 # =========================
 # PERMISSION PARSER UNIVERSAL
 # =========================
-# Cari 1 baris yang mengandung IP, lalu ambil:
-# - username: token non-date, non-ip, non-### yang paling masuk akal
-# - exp: token yang match YYYY-MM-DD atau lifetime
 perm_parse_line() {
   local line ip
   line="$1"
   ip="$2"
-
-  # remove CR
   line="$(echo "$line" | tr -d '\r')"
 
-  # find exp token
   local exp
   exp="$(echo "$line" | grep -Eo '(lifetime|Lifetime|[0-9]{4}-[0-9]{2}-[0-9]{2})' | head -n1 || true)"
 
-  # find username token:
-  # ambil token kedua pada format "### user exp ip" kalau ketemu, else cari token non ### non exp non ip
   local user=""
   if echo "$line" | grep -qE '^\s*###\s+'; then
     user="$(echo "$line" | awk '{print $2}' | tr -d '\r' || true)"
   fi
+
   if [[ -z "$user" ]]; then
     user="$(echo "$line" | awk -v ip="$ip" -v exp="$exp" '
       {
@@ -207,7 +200,8 @@ permission_check() {
   username="${parsed%%|*}"
   useexp="${parsed##*|}"
 
-  if [[ -z "${username:-}" ]]; then username="UNKNOWN"; fi
+  [[ -z "${username:-}" ]] && username="UNKNOWN"
+
   if [[ -z "${useexp:-}" ]]; then
     echo -e "${ERROR} Data permission tidak valid (expiry tidak ketemu)"
     echo -e "${ERROR} Line: $line"
@@ -217,17 +211,16 @@ permission_check() {
   echo -e "${OK} Username ( ${green}${username}${NC} )"
   echo -e "${OK} Expired  ( ${green}${useexp}${NC} )"
 
+  echo "$username" >/usr/bin/user 2>/dev/null || true
+  echo "$useexp" >/usr/bin/e 2>/dev/null || true
+
   if [[ "$useexp" == "lifetime" || "$useexp" == "Lifetime" ]]; then
     echo -e "${OK} Permission ( ${green}LIFETIME${NC} )"
-    echo "$username" >/usr/bin/user 2>/dev/null || true
-    echo "$useexp" >/usr/bin/e 2>/dev/null || true
     return 0
   fi
 
   if [[ "$server_date" < "$useexp" ]]; then
     echo -e "${OK} Permission ( ${green}ACTIVE${NC} )"
-    echo "$username" >/usr/bin/user 2>/dev/null || true
-    echo "$useexp" >/usr/bin/e 2>/dev/null || true
   else
     echo -e "${ERROR} Permission EXPIRED (Exp: ${useexp})"
     exit 1
@@ -256,7 +249,16 @@ precheck() {
   permission_check
 
   echo ""
-  read -p "$(echo -e "Press ${GRAY}[ ${NC}${green}Enter${NC} ${GRAY}]${NC} For Starting Installation") " _
+  echo -e "${OK} Tekan ENTER untuk memulai instalasi..."
+  read -r
+
+  clear
+  echo -e "${Green}"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo " INSTALLATION STARTED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo -e "${NC}"
+  sleep 1
 }
 
 input_domain() {
@@ -343,14 +345,27 @@ final_info() {
 
 main() {
   precheck
+
+  echo -e "${OK} Installing packages..."
   install_pkgs
+
+  echo -e "${OK} Installing menu & scripts..."
   setup_scripts
   setup_command_menu
+
+  echo -e "${OK} Setup domain..."
   input_domain
+
+  echo -e "${OK} Installing ZiVPN core..."
   install_core
+
   hash -r || true
   final_info
-  exec menu
+
+  echo -e "${Green}Launching Menu...${NC}"
+  sleep 2
+
+  menu
 }
 
 main "$@"
