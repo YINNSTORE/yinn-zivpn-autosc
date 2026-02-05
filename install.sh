@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# =========================
+# CONFIG GITHUB REPO AUTOSCRIPT
+# =========================
 GITHUB_USER="YINNSTORE"
 GITHUB_REPO="yinn-zivpn-autosc"
 BRANCH="main"
-
 REPO_RAW_BASE="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${BRANCH}"
+
+# =========================
+# PERMISSION SOURCE (VVIP STYLE)
+# =========================
+PERM_URL="https://raw.githubusercontent.com/YINNSTORE/permision/main/reg"
+
+# =========================
+# PATHS (VERSI KITA)
+# =========================
 WORKDIR="/usr/local/yinn-zivpn"
 SCRIPTS_DIR="${WORKDIR}/scripts"
 
@@ -16,23 +27,85 @@ USERS_DIR="${BASE}/users"
 BIN="/usr/local/bin/zivpn"
 SVC_FILE="/etc/systemd/system/zivpn.service"
 
+# =========================
+# COLORS
+# =========================
+Green="\e[92;1m"
+RED="\033[31m"
+YELLOW="\033[33m"
+BLUE="\033[36m"
+FONT="\033[0m"
+OK="${Green}--->${FONT}"
+ERROR="${RED}[ERROR]${FONT}"
+NC='\e[0m'
+purple="\e[0;33m"
+green='\e[0;32m'
+GRAY="\e[1;30m"
+
+# =========================
+# HELPERS
+# =========================
 need_root() {
-  [[ "${EUID:-$(id -u)}" -eq 0 ]] || { echo "Run as root"; exit 1; }
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    echo -e "${ERROR} Run as root"
+    exit 1
+  fi
 }
 
-pause() { read -rp "Enter untuk lanjut..." _; }
+get_ip() {
+  curl -sS ipv4.icanhazip.com 2>/dev/null || true
+}
+
+get_server_date() {
+  # ambil tanggal dari header Date (anti jam VPS ngaco)
+  local data_server date_list
+  data_server="$(curl -v --insecure --silent https://google.com/ 2>&1 | grep -i '^< date:' | sed -e 's/< Date: //I' | tr -d '\r' || true)"
+  date_list="$(date +"%Y-%m-%d" -d "$data_server" 2>/dev/null || date +"%Y-%m-%d")"
+  echo "$date_list"
+}
+
+is_supported_arch() {
+  [[ "$(uname -m | awk '{print $1}')" == "x86_64" ]]
+}
+
+is_supported_os() {
+  local osid
+  osid="$(. /etc/os-release && echo "$ID")"
+  [[ "$osid" == "ubuntu" || "$osid" == "debian" ]]
+}
+
+virt_check() {
+  if [[ "$(systemd-detect-virt 2>/dev/null || true)" == "openvz" ]]; then
+    echo -e "${ERROR} OpenVZ is not supported"
+    exit 1
+  fi
+}
+
+print_banner() {
+  clear; clear; clear
+  echo -e "${YELLOW}----------------------------------------------------------${NC}"
+  echo -e " WELCOME TO AUTOSCRIPT ZIVPN ${YELLOW}(${NC}${green}YINN STORE EDITION${NC}${YELLOW})${NC}"
+  echo -e " PROSES PENGECEKAN VPS & PERMISSION !!"
+  echo -e "${purple}----------------------------------------------------------${NC}"
+  echo -e " ›AUTHOR : ${green}YINN STORE${NC} ${YELLOW}(${NC}${green}ZIVPN${NC}${YELLOW})${NC}"
+  echo -e " ›TEAM   : YINN STORE ${YELLOW}(${NC} 2026 ${YELLOW})${NC}"
+  echo -e "${YELLOW}----------------------------------------------------------${NC}"
+  echo ""
+  sleep 1
+}
 
 install_pkgs() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
+
+  # paket inti buat menu + core + utilitas
   apt-get install -y \
     bash curl wget jq openssl ca-certificates \
     iproute2 net-tools vnstat \
     iptables cron tzdata \
     unzip git \
-    python3 python3-pip \
     speedtest-cli \
-    lolcat || true
+    lolcat >/dev/null 2>&1 || true
 
   timedatectl set-timezone Asia/Jakarta >/dev/null 2>&1 || true
   systemctl enable vnstat >/dev/null 2>&1 || true
@@ -72,17 +145,14 @@ setup_command_menu() {
 
 input_domain() {
   mkdir -p "${CONF_DIR}" "${USERS_DIR}" >/dev/null 2>&1
-
+  clear
+  echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo -e " ${green}AUTOSCRIPT ZIVPN - YINN STORE${NC}"
+  echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
   echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo " AUTOSCRIPT ZIVPN - YINN STORE"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo ""
-
-  local d
   read -rp "Input Domain (wajib): " d
   if [[ -z "${d:-}" ]]; then
-    echo "Domain kosong. ulangin."
+    echo -e "${ERROR} Domain kosong"
     exit 1
   fi
   echo -n "$d" > "${CONF_DIR}/domain"
@@ -97,11 +167,11 @@ install_core() {
   read -rp "Core URL (Enter=default): " url
   [[ -z "${url:-}" ]] && url="$def"
 
-  echo "Download core..."
+  echo -e "${OK} Download core..."
   curl -fsSL "$url" -o "$BIN"
   chmod +x "$BIN"
 
-  echo "Write config..."
+  echo -e "${OK} Write config..."
   cat > "${CONF_DIR}/config.json" <<'EOF'
 {
   "listen": ":5667",
@@ -110,12 +180,12 @@ install_core() {
 }
 EOF
 
-  echo "Generate SSL self-signed..."
+  echo -e "${OK} Generate SSL self-signed..."
   openssl req -new -newkey rsa:4096 -days 365 -nodes -x509 \
     -subj "/C=ID/ST=JawaBarat/L=Jampang/O=YinnStore/OU=ZiVPN/CN=${d}" \
     -keyout "${CONF_DIR}/zivpn.key" -out "${CONF_DIR}/zivpn.crt" >/dev/null 2>&1
 
-  echo "Write systemd..."
+  echo -e "${OK} Write systemd..."
   cat > "$SVC_FILE" <<EOF
 [Unit]
 Description=ZiVPN UDP Core (YinnStore)
@@ -142,23 +212,97 @@ EOF
   systemctl restart zivpn.service >/dev/null 2>&1
 }
 
+save_perm_info() {
+  local myip username exp
+  myip="$(get_ip)"
+  username="$(curl -fsSL "$PERM_URL" | grep -w "$myip" | awk '{print $2}' | head -n1 || true)"
+  exp="$(curl -fsSL "$PERM_URL" | grep -w "$myip" | awk '{print $3}' | head -n1 || true)"
+  [[ -n "$username" ]] && echo "$username" > /usr/bin/user || true
+  [[ -n "$exp" ]] && echo "$exp" > /usr/bin/e || true
+}
+
+permission_check() {
+  local myip server_date useexp
+  myip="$(get_ip)"
+  server_date="$(get_server_date)"
+
+  if [[ -z "${myip:-}" ]]; then
+    echo -e "${ERROR} IP tidak terdeteksi"
+    exit 1
+  fi
+
+  useexp="$(curl -fsSL "$PERM_URL" | grep -w "$myip" | awk '{print $3}' | head -n1 || true)"
+
+  echo -e "${OK} IP Address ( ${green}${myip}${NC} )"
+  echo -e "${OK} Server Date ( ${green}${server_date}${NC} )"
+
+  if [[ -z "${useexp:-}" ]]; then
+    echo -e "${ERROR} VPS anda tidak memiliki akses untuk script"
+    exit 1
+  fi
+
+  if [[ "$useexp" == "lifetime" || "$useexp" == "Lifetime" ]]; then
+    echo -e "${OK} Permission ( ${green}LIFETIME${NC} )"
+    return 0
+  fi
+
+  # compare YYYY-MM-DD string
+  if [[ "$server_date" < "$useexp" ]]; then
+    echo -e "${OK} Permission ( ${green}ACTIVE${NC} ) Exp: ${useexp}"
+  else
+    echo -e "${ERROR} Permission EXPIRED (Exp: ${useexp})"
+    exit 1
+  fi
+}
+
+precheck() {
+  print_banner
+  need_root
+  virt_check
+
+  if is_supported_arch; then
+    echo -e "${OK} Architecture Supported ( ${green}$(uname -m)${NC} )"
+  else
+    echo -e "${ERROR} Architecture Not Supported ( $(uname -m) )"
+    exit 1
+  fi
+
+  if is_supported_os; then
+    echo -e "${OK} OS Supported ( ${green}$(grep -w PRETTY_NAME /etc/os-release | head -n1 | cut -d= -f2- | tr -d '"')${NC} )"
+  else
+    echo -e "${ERROR} OS Not Supported"
+    exit 1
+  fi
+
+  permission_check
+
+  echo ""
+  read -p "$(echo -e "Press ${GRAY}[ ${NC}${green}Enter${NC} ${GRAY}]${NC} For Starting Installation") " _
+}
+
 final_info() {
   echo ""
+  echo "------------------------------------------------------------"
   echo "✅ INSTALL SELESAI"
-  echo "Command: menu"
-  echo "Service: systemctl status zivpn.service"
-  echo "Domain : $(cat "${CONF_DIR}/domain" 2>/dev/null || echo '-')"
-  echo "Path   : ${WORKDIR}"
+  echo "Command : menu"
+  echo "Service : systemctl status zivpn.service"
+  echo "Domain  : $(cat "${CONF_DIR}/domain" 2>/dev/null || echo '-')"
+  echo "------------------------------------------------------------"
   echo ""
 }
 
 main() {
-  need_root
+  precheck
+
   install_pkgs
   setup_scripts
   setup_command_menu
+
   input_domain
   install_core
+
+  save_perm_info
+
   hash -r || true
   final_info
 
